@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Word Bites – Lobby</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- 🔥 Firebase FIRST -->
+  <script type="module">
+    const showError = (msg) => {
+      const box = document.getElementById("errorBox");
+      if (box) {
+        box.style.display = "block";
+        box.textContent = "🔥 ERROR:\n" + msg;
+      }
+    };
+
+    try {
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+      import {
+        getFirestore, doc, setDoc, onSnapshot, serverTimestamp
+      } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+      import {
+        getAuth, signInAnonymously, onAuthStateChanged
+      } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+
+      const APP_ID = "word-bites-multiplayer";
+
+      const firebaseConfig = {
+        apiKey: "AIzaSyBQy33Ceipa8m42ccm5aOErw1PEieHjyw8",
+        authDomain: "custom-word-bites.firebaseapp.com",
+        projectId: "custom-word-bites",
+        storageBucket: "custom-word-bites.appspot.com",
+        messagingSenderId: "999136584278",
+        appId: "1:999136584278:web:88671a551de8324b95d1f7"
+      };
+
+      const app = initializeApp(firebaseConfig);
+      const db = getFirestore(app);
+      const auth = getAuth(app);
+
+      let currentUser = null;
+
+      signInAnonymously(auth);
+
+      onAuthStateChanged(auth, async (user) => {
+        if (!user) return;
+        currentUser = user;
+
+        // Save presence
+        const name = localStorage.getItem("word_bites_username") || "PLAYER";
+        const userRef = doc(db, "artifacts", APP_ID, "public", "presence", user.uid);
+
+        await setDoc(
+          userRef,
+          {
+            name,
+            online: true,
+            lastActive: serverTimestamp()
+          },
+          { merge: true }
+        );
+
+        // Auto-update presence every 20 seconds
+        setInterval(() => {
+          setDoc(
+            userRef,
+            { online: true, lastActive: serverTimestamp() },
+            { merge: true }
+          );
+        }, 20000);
+
+        window._presenceRef = userRef;
+      });
+
+      window._firebase = { db };
+    } catch (err) {
+      showError("Firebase failed to load:\n" + err);
+    }
+  </script>
+
+  <!-- React + ReactDOM + Babel -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.6/babel.min.js"></script>
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #0f172a;
+      font-family: ui-sans-serif, system-ui;
+    }
+    #errorBox {
+      display: none;
+      background: #7f1d1d;
+      color: #fecaca;
+      padding: 16px;
+      border-radius: 12px;
+      margin: 16px;
+      font-weight: bold;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+
+<body class="text-white">
+  <div id="errorBox"></div>
+
+  <div class="min-h-screen flex flex-col items-center p-4">
+    <div class="w-full max-w-md">
+      <div id="root"></div>
+    </div>
+  </div>
+  <!-- React App -->
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function LobbyApp() {
+      const [name, setName] = useState(
+        localStorage.getItem("word_bites_username") || ""
+      );
+      const [players, setPlayers] = useState([]);
+      const [loading, setLoading] = useState(true);
+
+      const db = window._firebase?.db;
+
+      // Save name
+      const saveName = () => {
+        if (!name.trim()) return;
+        localStorage.setItem("word_bites_username", name.trim());
+
+        // Update presence name
+        if (window._presenceRef) {
+          import("https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js")
+            .then(({ setDoc, serverTimestamp }) => {
+              setDoc(
+                window._presenceRef,
+                {
+                  name: name.trim(),
+                  lastActive: serverTimestamp()
+                },
+                { merge: true }
+              );
+            });
+        }
+      };
+
+      // Listen for online players
+      useEffect(() => {
+        if (!db) return;
+
+        import("https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js")
+          .then(({ collection, onSnapshot }) => {
+            const ref = collection(
+              db,
+              "artifacts",
+              "word-bites-multiplayer",
+              "public",
+              "presence"
+            );
+
+            return onSnapshot(ref, (snap) => {
+              const list = [];
+              snap.forEach((doc) => {
+                const d = doc.data();
+                if (d.online) list.push({ id: doc.id, ...d });
+              });
+              setPlayers(list);
+              setLoading(false);
+            });
+          });
+      }, [db]);
+
+      return (
+        <div className="w-full flex flex-col gap-6 mt-4">
+
+          {/* Title */}
+          <div className="text-center">
+            <h1 className="text-3xl font-black text-amber-400">WORD BITES</h1>
+            <p className="text-slate-400 text-sm">Multiplayer Lobby</p>
+          </div>
+
+          {/* Name entry */}
+          <div className="bg-slate-900/70 p-4 rounded-2xl border border-slate-700">
+            <label className="text-xs text-slate-400 font-bold">YOUR NAME</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onBlur={saveName}
+              placeholder="Enter your name"
+              className="w-full mt-1 px-3 py-2 rounded-xl bg-slate-800 text-white text-sm outline-none border border-slate-700 focus:border-amber-400"
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              Press enter or click away to save.
+            </p>
+          </div>
+
+          {/* Buttons */}
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={() => (window.location.href = 'singleplayer.html')}
+              className="w-full py-3 rounded-2xl bg-green-500 text-green-950 font-black text-sm shadow-md active:scale-95 transition-transform"
+            >
+              SINGLE PLAYER
+            </button>
+
+            <button
+              disabled
+              className="w-full py-3 rounded-2xl bg-slate-700 text-slate-400 font-black text-sm shadow-md opacity-60 cursor-not-allowed"
+            >
+              MULTIPLAYER (COMING SOON)
+            </button>
+          </div>
+
+          {/* Online players */}
+          <div className="bg-slate-900/70 p-4 rounded-2xl border border-slate-700">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-slate-300 uppercase">
+                Online Players
+              </span>
+              <span className="text-xs text-slate-500">
+                {loading ? "…" : players.length}
+              </span>
+            </div>
+
+            <div className="max-h-48 overflow-y-auto custom-scrollbar text-sm">
+              {players.length === 0 && (
+                <div className="text-slate-500 text-xs">
+                  No players online right now.
+                </div>
+              )}
+
+              {players.map((p) => (
+                <div
+                  key={p.id}
+                  className="flex items-center justify-between py-2 border-b border-slate-800 last:border-none"
+                >
+                  <span className="text-slate-200">{p.name}</span>
+                  <button
+                    disabled
+                    className="px-3 py-1 rounded-xl bg-slate-700 text-slate-400 text-xs font-bold cursor-not-allowed"
+                  >
+                    INVITE
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+        </div>
+      );
+    }
+
+    // Mount React
+    try {
+      const rootEl = document.getElementById("root");
+      const root = ReactDOM.createRoot(rootEl);
+      root.render(<LobbyApp />);
+    } catch (err) {
+      const box = document.getElementById("errorBox");
+      if (box) {
+        box.style.display = "block";
+        box.textContent = "🔥 ERROR RENDERING LOBBY:\n" + err;
+      }
+    }
+  </script>
+</body>
+</html>
