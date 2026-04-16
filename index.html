@@ -69,7 +69,8 @@
           if (!user) return;
           currentUser = user;
 
-          const userRef = doc(usersCol, currentUser.uid);
+          const userRef = doc(db, "users", currentUser.uid);
+
           const snap = await getDoc(userRef);
 
           if (!snap.exists()) {
