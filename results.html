@@ -5,7 +5,7 @@
   <title>Word Bites – Results</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 
-  <!-- 🔥 Firebase FIRST -->
+  <!-- 🔥 Firebase (FLAT STRUCTURE) -->
   <script type="module">
     const showError = (msg) => {
       const box = document.getElementById("errorBox");
@@ -14,8 +14,6 @@
         box.textContent = "🔥 ERROR:\n" + msg;
       }
     };
-
-    const APP_ID = "word-bites-multiplayer";
 
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
     import {
@@ -30,6 +28,15 @@
       onAuthStateChanged
     } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
 
+    const firebaseConfig = {
+      apiKey: "AIzaSyBQy33Ceipa8m42ccm5aOErw1PEieHjyw8",
+      authDomain: "custom-word-bites.firebaseapp.com",
+      projectId: "custom-word-bites",
+      storageBucket: "custom-word-bites.appspot.com",
+      messagingSenderId: "999136584278",
+      appId: "1:999136584278:web:88671a551de8324b95d1f7"
+    };
+
     let app, db, auth;
     let currentUser = null;
     let matchRef = null;
@@ -37,15 +44,7 @@
     let role = null;
 
     try {
-      app = initializeApp({
-        apiKey: "AIzaSyBQy33Ceipa8m42ccm5aOErw1PEieHjyw8",
-        authDomain: "custom-word-bites.firebaseapp.com",
-        projectId: "custom-word-bites",
-        storageBucket: "custom-word-bites.appspot.com",
-        messagingSenderId: "999136584278",
-        appId: "1:999136584278:web:88671a551de8324b95d1f7"
-      });
-
+      app = initializeApp(firebaseConfig);
       db = getFirestore(app);
       auth = getAuth(app);
     } catch (err) {
@@ -59,18 +58,24 @@
       showError("No match ID provided.");
     }
 
+    // ⭐ FLAT COLLECTION
+    const MATCHES = "matches";
+
     const loadMatch = async () => {
-      matchRef = doc(db, "artifacts", APP_ID, "public", "data", "matches", matchId);
+      matchRef = doc(db, MATCHES, matchId);
       const snap = await getDoc(matchRef);
+
       if (!snap.exists()) {
         showError("Match not found.");
         return;
       }
+
       matchData = snap.data();
     };
 
     const determineRole = () => {
       if (!matchData || !currentUser) return;
+
       if (matchData.hostId === currentUser.uid) role = "host";
       else if (matchData.guestId === currentUser.uid) role = "guest";
       else role = "spectator";
@@ -105,13 +110,12 @@
       }
     };
 
-    if (auth) {
-      signInAnonymously(auth);
-      onAuthStateChanged(auth, (user) => {
-        if (!user) return;
-        currentUser = user;
-      });
-    }
+    signInAnonymously(auth);
+
+    onAuthStateChanged(auth, (user) => {
+      if (!user) return;
+      currentUser = user;
+    });
   </script>
 
   <!-- React + ReactDOM + Babel -->
@@ -156,6 +160,7 @@
     </div>
   </div>
 
+  <!-- ⭐ React Results Screen -->
   <script type="text/babel">
     const { useState, useEffect } = React;
 
