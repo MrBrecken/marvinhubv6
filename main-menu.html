@@ -7,20 +7,6 @@
 
   <!-- 🔥 Firebase FIRST -->
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
-    import {
-      getFirestore,
-      doc,
-      getDoc,
-      setDoc,
-      collection
-    } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
-    import {
-      getAuth,
-      signInAnonymously,
-      onAuthStateChanged
-    } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
-
     const showError = (msg) => {
       const box = document.getElementById("errorBox");
       if (box) {
@@ -29,79 +15,106 @@
       }
     };
 
-    const APP_ID = "word-bites-multiplayer";
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+    import {
+      getFirestore,
+      doc,
+      getDoc,
+      setDoc
+    } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+    import {
+      getAuth,
+      signInAnonymously,
+      onAuthStateChanged
+    } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
 
-    const firebaseConfig = {
-      apiKey: "AIzaSyBQy33Ceipa8m42ccm5aOErw1PEieHjyw8",
-      authDomain: "custom-word-bites.firebaseapp.com",
-      projectId: "custom-word-bites",
-      storageBucket: "custom-word-bites.appspot.com",
-      messagingSenderId: "999136584278",
-      appId: "1:999136584278:web:88671a551de8324b95d1f7"
-    };
-
+    let app, db, auth;
     let currentUser = null;
     let currentName = localStorage.getItem("word_bites_username") || "PLAYER";
-
-    let app, db, auth, usersCol;
+    let highScore = localStorage.getItem("word_bites_highscore") || 0;
 
     try {
-      app = initializeApp(firebaseConfig);
+      app = initializeApp({
+        apiKey: "AIzaSyBQy33Ceipa8m42ccm5aOErw1PEieHjyw8",
+        authDomain: "custom-word-bites.firebaseapp.com",
+        projectId: "custom-word-bites",
+        storageBucket: "custom-word-bites.appspot.com",
+        messagingSenderId: "999136584278",
+        appId: "1:999136584278:web:88671a551de8324b95d1f7"
+      });
+
       db = getFirestore(app);
       auth = getAuth(app);
-      usersCol = collection(db, "artifacts", APP_ID, "public", "data", "users");
     } catch (err) {
       showError("Firebase init failed:\n" + err);
     }
 
+    // ⭐ FLAT COLLECTION
+    const usersCol = "users";
+
     if (auth) {
-      signInAnonymously(auth).catch((err) => {
-        showError("Anonymous sign-in failed:\n" + err);
-      });
+      signInAnonymously(auth);
 
       onAuthStateChanged(auth, async (user) => {
         if (!user) return;
         currentUser = user;
 
-        try {
-          const userRef = doc(usersCol, currentUser.uid);
-          const snap = await getDoc(userRef);
+        const userRef = doc(db, usersCol, currentUser.uid);
+        const snap = await getDoc(userRef);
 
-          if (!snap.exists()) {
-            await setDoc(userRef, {
-              name: currentName,
-              online: true,
-              lastActive: Date.now(),
-              highScore: 0,
-              mostWords: 0,
-              totalWords: 0,
-              roundsPlayed: 0,
-              wins: 0,
-              losses: 0,
-              draws: 0
-            });
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.name) {
+            currentName = data.name;
+            localStorage.setItem("word_bites_username", data.name);
           }
-
-          window._WB_MENU_CONTEXT = {
-            db,
-            usersCol,
-            currentUser,
-            async getStats() {
-              const s = await getDoc(doc(usersCol, currentUser.uid));
-              return s.exists() ? s.data() : null;
-            }
-          };
-        } catch (err) {
-          showError("Error loading user stats:\n" + err);
+          if (data.highScore) {
+            highScore = data.highScore;
+            localStorage.setItem("word_bites_highscore", data.highScore);
+          }
+        } else {
+          await setDoc(userRef, {
+            name: currentName,
+            highScore: Number(highScore),
+            lastActive: Date.now()
+          });
         }
+
+        document.getElementById("playerName").textContent = currentName;
+        document.getElementById("bestScore").textContent = highScore;
       });
     }
-  </script>
 
-  <!-- React + ReactDOM + Babel -->
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.6/babel.min.js"></script>
+    window.saveHighScoreToFirebase = async (score) => {
+      if (!currentUser) return;
+      const userRef = doc(db, usersCol, currentUser.uid);
+
+      await setDoc(
+        userRef,
+        {
+          name: currentName,
+          highScore: score,
+          lastActive: Date.now()
+        },
+        { merge: true }
+      );
+    };
+
+    window.updateName = async () => {
+      const newName = prompt("Enter your display name:", currentName);
+      if (!newName) return;
+
+      currentName = newName;
+      localStorage.setItem("word_bites_username", newName);
+
+      if (currentUser) {
+        const userRef = doc(db, usersCol, currentUser.uid);
+        await setDoc(userRef, { name: newName }, { merge: true });
+      }
+
+      document.getElementById("playerName").textContent = newName;
+    };
+  </script>
 
   <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -110,7 +123,7 @@
     body {
       margin: 0;
       padding: 0;
-      background-color: #020617;
+      background-color: #0f172a;
       font-family: ui-sans-serif, system-ui;
     }
     #errorBox {
@@ -130,94 +143,43 @@
   <div id="errorBox"></div>
 
   <div class="min-h-screen flex flex-col items-center p-4">
-    <div class="w-full max-w-md">
-      <div id="root"></div>
+    <div class="w-full max-w-md flex flex-col gap-6 mt-10">
+
+      <h1 class="text-3xl font-black text-amber-400 text-center">
+        WORD BITES
+      </h1>
+
+      <div class="bg-slate-900/80 border border-slate-700 rounded-3xl p-4 shadow-xl text-center">
+        <div class="text-xs text-slate-400">Player</div>
+        <div id="playerName" class="text-xl font-black text-white">PLAYER</div>
+        <button
+          onclick="updateName()"
+          class="mt-2 text-xs px-3 py-2 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-500 active:scale-95 transition"
+        >
+          EDIT NAME
+        </button>
+      </div>
+
+      <div class="bg-slate-900/80 border border-slate-700 rounded-3xl p-4 shadow-xl text-center">
+        <div class="text-xs text-slate-400">Best Score</div>
+        <div id="bestScore" class="text-xl font-black text-amber-300">0</div>
+      </div>
+
+      <button
+        onclick="window.location.href='singleplayer.html'"
+        class="py-3 rounded-2xl bg-green-500 text-green-950 font-black text-sm shadow-md active:scale-95 transition-transform"
+      >
+        SINGLE PLAYER
+      </button>
+
+      <button
+        onclick="window.location.href='index.html'"
+        class="py-3 rounded-2xl bg-blue-500 text-blue-950 font-black text-sm shadow-md active:scale-95 transition-transform"
+      >
+        MULTIPLAYER
+      </button>
+
     </div>
   </div>
-
-  <script type="text/babel">
-    const { useState, useEffect } = React;
-
-    function MainMenu() {
-      const [loading, setLoading] = useState(true);
-      const [stats, setStats] = useState(null);
-
-      useEffect(() => {
-        const interval = setInterval(async () => {
-          if (window._WB_MENU_CONTEXT && window._WB_MENU_CONTEXT.currentUser) {
-            const s = await window._WB_MENU_CONTEXT.getStats();
-            setStats(s);
-            setLoading(false);
-            clearInterval(interval);
-          }
-        }, 200);
-
-        setTimeout(() => setLoading(false), 8000);
-        return () => clearInterval(interval);
-      }, []);
-
-      if (loading || !stats) {
-        return (
-          <div className="w-full mt-10 text-center text-slate-400 text-sm">
-            Loading your profile...
-          </div>
-        );
-      }
-
-      return (
-        <div className="w-full flex flex-col gap-6 mt-4">
-          <div className="text-center">
-            <h1 className="text-4xl font-black text-amber-400 tracking-tight">
-              WORD BITES
-            </h1>
-            <p className="text-xs text-slate-400 mt-1">
-              Fast-paced tile-dragging word game
-            </p>
-          </div>
-
-          <div className="bg-slate-900/80 border border-slate-700 rounded-3xl p-5 shadow-xl">
-            <h2 className="text-sm font-bold text-slate-300 uppercase mb-3">
-              Your Stats
-            </h2>
-
-            <div className="text-sm text-slate-200 space-y-1">
-              <div>High Score: <span className="text-amber-300 font-bold">{stats.highScore}</span></div>
-              <div>Most Words: <span className="text-amber-300 font-bold">{stats.mostWords}</span></div>
-              <div>Total Words: <span className="text-amber-300 font-bold">{stats.totalWords}</span></div>
-              <div>Rounds Played: <span className="text-amber-300 font-bold">{stats.roundsPlayed}</span></div>
-            </div>
-
-            <div className="mt-3 text-sm text-slate-200">
-              Multiplayer Record:
-              <div className="flex gap-4 mt-1 text-amber-300 font-bold">
-                <span>Wins {stats.wins}</span>
-                <span>Losses {stats.losses}</span>
-                <span>Draws {stats.draws}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            <button
-              onClick={() => window.location.href = "singleplayer.html"}
-              className="w-full py-3 rounded-2xl bg-green-500 text-green-950 font-black text-sm shadow-md active:scale-95 transition"
-            >
-              SINGLE PLAYER
-            </button>
-
-            <button
-              onClick={() => window.location.href = "index.html"}
-              className="w-full py-3 rounded-2xl bg-blue-500 text-blue-950 font-black text-sm shadow-md active:scale-95 transition"
-            >
-              MULTIPLAYER
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    const root = ReactDOM.createRoot(document.getElementById("root"));
-    root.render(<MainMenu />);
-  </script>
 </body>
 </html>
