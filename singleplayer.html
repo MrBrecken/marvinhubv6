@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Word Bites - Single Player</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+
+<!-- 🔥 Firebase (flat users/{uid}) -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+import {
+  getFirestore, doc, getDoc, setDoc
+} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+import {
+  getAuth, signInAnonymously, onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+
+const showError = (msg) => {
+  const box = document.getElementById("errorBox");
+  if (box) {
+    box.style.display = "block";
+    box.textContent = "ERROR:\n" + msg;
+  }
+};
+
+try {
+  const firebaseConfig = {
+    apiKey: "AIzaSyBQy33Ceipa8m42ccm5aOErw1PEieHjyw8",
+    authDomain: "custom-word-bites.firebaseapp.com",
+    projectId: "custom-word-bites",
+    storageBucket: "custom-word-bites.appspot.com",
+    messagingSenderId: "999136584278",
+    appId: "1:999136584278:web:88671a551de8324b95d1f7"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const auth = getAuth(app);
+
+  let currentUser = null;
+  let currentName = localStorage.getItem("word_bites_username") || "PLAYER";
+
+  const USERS = "users";
+
+  signInAnonymously(auth);
+
+  onAuthStateChanged(auth, async (user) => {
+    if (!user) return;
+    currentUser = user;
+
+    const userRef = doc(db, USERS, currentUser.uid);
+    const snap = await getDoc(userRef);
+
+    if (snap.exists()) {
+      const data = snap.data();
+      if (data.highScore) {
+        localStorage.setItem("word_bites_highscore", data.highScore);
+      }
+      if (data.name) {
+        currentName = data.name;
+        localStorage.setItem("word_bites_username", data.name);
+      }
+    } else {
+      await setDoc(userRef, {
+        name: currentName,
+        highScore: 0,
+        lastActive: Date.now()
+      });
+    }
+  });
+
+  window.saveHighScoreToFirebase = async (score) => {
+    if (!currentUser) return;
+    const userRef = doc(db, USERS, currentUser.uid);
+
+    await setDoc(
+      userRef,
+      {
+        name: currentName,
+        highScore: score,
+        lastActive: Date.now()
+      },
+      { merge: true }
+    );
+  };
+
+} catch (err) {
+  showError("Firebase failed to load:\n" + err);
+}
+</script>
+
+<!-- React + ReactDOM + Babel -->
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.6/babel.min.js"></script>
+
+<!-- Tailwind -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #0f172a;
+  overflow-x: hidden;
+  touch-action: none;
+  font-family: ui-sans-serif, system-ui;
+}
+
+.board-grid {
+  background-image: radial-gradient(circle, #1e293b 1px, transparent 1px);
+  background-size: var(--cell-size) var(--cell-size);
+}
+
+@keyframes shuffle-pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.02); opacity: 0.7; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.shuffling { animation: shuffle-pop 0.4s ease-in-out; }
+
+.custom-scrollbar::-webkit-scrollbar { width: 6px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
+
+* { -webkit-tap-highlight-color: transparent; }
+
+#errorBox {
+  display: none;
+  background: #7f1d1d;
+  color: #fecaca;
+  padding: 16px;
+  border-radius: 12px;
+  margin: 16px;
+  font-weight: bold;
+  white-space: pre-wrap;
+}
+</style>
+</head>
+
+<body class="text-white">
+<div id="errorBox"></div>
+
+<div class="min-h-screen flex flex-col items-center p-4">
+  <div class="w-full max-w-md">
+    <div id="root"></div>
+  </div>
+</div>
+
+<!-- ⭐ React Game Code -->
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+const COLS = 8;
+const ROWS = 8;
+const INITIAL_TIME = 90;
+const VOWELS = "AEIOU";
+const CONSONANTS = "BCDFGHJKLMNPQRSTVWXYZ";
+const DICT_URL = "https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt";
+
+function getCells(shape, gx, gy) {
+  if (shape === "1x1") return [{ x: gx, y: gy }];
+  if (shape === "2x1") return [{ x: gx, y: gy }, { x: gx + 1, y: gy }];
+  if (shape === "1x2") return [{ x: gx, y: gy }, { x: gx, y: gy + 1 }];
+  return [];
+}
+
+function Tile({ tile, cellSize, onMoveComplete, flashingCells, disabled }) {
+  const [dragPos, setDragPos] = useState(null);
+  const startPos = useRef(null);
+
+  const w = tile.shape === "2x1" ? cellSize * 2 : cellSize;
+  const h = tile.shape === "1x2" ? cellSize * 2 : cellSize;
+  const px = tile.gridX * cellSize;
+  const py = tile.gridY * cellSize;
+
+  const isMoving = dragPos !== null;
+  const currentX = isMoving ? dragPos.x : px;
+  const currentY = isMoving ? dragPos.y : py;
+
+  const handlePointerDown = (e) => {
+    if (disabled) return;
+    e.target.setPointerCapture(e.pointerId);
+    startPos.current = { x: e.clientX, y: e.clientY, px, py };
+    setDragPos({ x: px, y: py });
+  };
+
+  const handlePointerMove = (e) => {
+    if (!startPos.current || disabled) return;
+    const dx = e.clientX - startPos.current.x;
+    const dy = e.clientY - startPos.current.y;
+    setDragPos({ x: startPos.current.px + dx, y: startPos.current.py + dy });
+  };
+
+  const handlePointerUp = (e) => {
+    if (!startPos.current || disabled) return;
+    e.target.releasePointerCapture(e.pointerId);
+    const dx = e.clientX - startPos.current.x;
+    const dy = e.clientY - startPos.current.y;
+    startPos.current = null;
+    setDragPos(null);
+    onMoveComplete(tile.id, dx, dy);
+  };
+
+  return (
+    <div
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      className={`absolute flex items-center justify-center font-bold text-xl cursor-grab active:cursor-grabbing rounded-xl shadow-lg border-b-4 select-none touch-none transition-transform overflow-hidden ${
+        isMoving ? "z-50 opacity-90 scale-105" : "z-10"
+      } bg-amber-100 border-amber-300 text-amber-900`}
+      style={{
+        width: w - 4,
+        height: h - 4,
+        transform: `translate(${currentX + 2}px, ${currentY + 2}px)`,
+        transition: isMoving ? "none" : "transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)"
+      }}
+    >
+      <div
+        className="flex w-full h-full"
+        style={{ flexDirection: tile.shape === "1x2" ? "column" : "row" }}
+      >
+        {tile.letters.map((l, i) => {
+          // Determine the grid coordinates for this specific letter
+          const cellX = tile.shape === "2x1" ? tile.gridX + i : tile.gridX;
+          const cellY = tile.shape === "1x2" ? tile.gridY + i : tile.gridY;
+          const isFlashing = flashingCells.has(`${cellX},${cellY}`);
+
+          return (
+            <div
+              key={i}
+              className={`flex-1 flex items-center justify-center relative transition-colors duration-300 ${
+                isFlashing ? "bg-green-500 text-white" : ""
+              }`}
+            >
+              {l}
+              {i === 0 && tile.shape !== "1x1" && (
+                <div
+                  className={`absolute bg-amber-900/10 z-10 ${
+                    tile.shape === "2x1"
+                      ? "right-0 top-1/4 bottom-1/4 w-[2px]"
+                      : "bottom-0 left-1/4 right-1/4 h-[2px]"
+                  }`}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SinglePlayerApp() {
+  const [gameState, setGameState] = useState("READY");
+  const [tiles, setTiles] = useState([]);
+  const [timeLeft, setTimeLeft] = useState(INITIAL_TIME);
+  const [isShuffling, setIsShuffling] = useState(false);
+  const [isEnding, setIsEnding] = useState(false);
+  const [currentScore, setCurrentScore] = useState(0);
+  const [highScore, setHighScore] = useState(
+    parseInt(localStorage.getItem("word_bites_highscore") || "0", 10)
+  );
+  const [collectedWords, setCollectedWords] = useState(new Set());
+  const [flashingCells, setFlashingCells] = useState(new Set());
+  const [boardSize, setBoardSize] = useState(0);
+  
+  const boardRef = useRef(null);
+  const collectedWordsRef = useRef(new Set());
+  const dictionaryRef = useRef(new Set());
+
+  // Load Dictionary
+  useEffect(() => {
+    fetch(DICT_URL)
+      .then((res) => res.text())
+      .then((text) => {
+        const words = text
+          .split("\n")
+          .map((w) => w.trim().toUpperCase())
+          .filter((w) => w.length > 2);
+        dictionaryRef.current = new Set(words);
+      });
+  }, []);
+
+  // Responsive Board
+  useEffect(() => {
+    const updateSize = () => {
+      if (boardRef.current) {
+        setBoardSize(boardRef.current.clientWidth);
+      }
+    };
+    window.addEventListener("resize", updateSize);
+    updateSize();
+    return () => window.removeEventListener("resize", updateSize);
+  }, []);
+
+  const getCellSize = () => (boardSize ? boardSize / COLS : 45);
+
+  // Timer
+  useEffect(() => {
+    if (gameState !== "PLAYING" || isEnding) return;
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          endSoloGame();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [gameState, isEnding]);
+
+  // Validation
+  useEffect(() => {
+    if (gameState !== "PLAYING" || dictionaryRef.current.size === 0) return;
+    
+    const grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+    tiles.forEach((t) => {
+      const c = getCells(t.shape, t.gridX, t.gridY);
+      c.forEach((cell, i) => {
+        grid[cell.y][cell.x] = { letter: t.letters[i], tileId: t.id };
+      });
+    });
+
+    const newlyValidCells = new Set();
+    const newWords = new Set();
+
+    // Check rows
+    for (let r = 0; r < ROWS; r++) {
+      let currentWord = "";
+      let currentCells = [];
+      for (let c = 0; c <= COLS; c++) {
+        if (c < COLS && grid[r][c]) {
+          currentWord += grid[r][c].letter;
+          currentCells.push(`${c},${r}`);
+        } else {
+          if (currentWord.length > 2 && dictionaryRef.current.has(currentWord)) {
+            if (!collectedWordsRef.current.has(currentWord)) {
+              newWords.add(currentWord);
+              currentCells.forEach((cell) => newlyValidCells.add(cell));
+            }
+          }
+          currentWord = "";
+          currentCells = [];
+        }
+      }
+    }
+
+    // Check cols
+    for (let c = 0; c < COLS; c++) {
+      let currentWord = "";
+      let currentCells = [];
+      for (let r = 0; r <= ROWS; r++) {
+        if (r < ROWS && grid[r][c]) {
+          currentWord += grid[r][c].letter;
+          currentCells.push(`${c},${r}`);
+        } else {
+          if (currentWord.length > 2 && dictionaryRef.current.has(currentWord)) {
+            if (!collectedWordsRef.current.has(currentWord)) {
+              newWords.add(currentWord);
+              currentCells.forEach((cell) => newlyValidCells.add(cell));
+            }
+          }
+          currentWord = "";
+          currentCells = [];
+        }
+      }
+    }
+
+    if (newWords.size > 0) {
+      newWords.forEach((w) => {
+        collectedWordsRef.current.add(w);
+      });
+
+      setCollectedWords(new Set(collectedWordsRef.current));
+      setCurrentScore(
+        Array.from(collectedWordsRef.current).reduce(
+          (acc, w) => acc + w.length * 100,
+          0
+        )
+      );
+
+      // Trigger the 0.5 second flash
+      setFlashingCells((prev) => {
+        const next = new Set(prev);
+        newlyValidCells.forEach(c => next.add(c));
+        return next;
+      });
+
+      setTimeout(() => {
+        setFlashingCells((prev) => {
+          const next = new Set(prev);
+          newlyValidCells.forEach(c => next.delete(c));
+          return next;
+        });
+      }, 500);
+    }
+  }, [tiles, gameState]);
+
+  const repositionTiles = (tilesArr) => {
+    const placed = [];
+    // Map a deep copy so React registers individual tile updates during Shuffle
+    const result = tilesArr.map(t => ({ ...t }));
+    
+    for (let t of result) {
+      let gx, gy;
+      let collision = true;
+      let attempts = 0;
+      
+      while (collision && attempts < 1000) {
+        gx = Math.floor(Math.random() * (COLS - (t.shape === "2x1" ? 1 : 0)));
+        gy = Math.floor(Math.random() * (ROWS - (t.shape === "1x2" ? 1 : 0)));
+        const req = getCells(t.shape, gx, gy);
+        
+        collision = req.some((c) =>
+          placed.some((p) => {
+            if (attempts < 600) {
+              // First 600 attempts: Strict 8-way gap (no touching corners or edges)
+              return Math.abs(p.x - c.x) <= 1 && Math.abs(p.y - c.y) <= 1;
+            } else if (attempts < 900) {
+              // Next 300 attempts: Relax to 4-way orthogonal gap (edges don't touch, corners allowed)
+              return Math.abs(p.x - c.x) + Math.abs(p.y - c.y) <= 1;
+            } else {
+              // Emergency fallback: Just don't overlap tiles
+              return p.x === c.x && p.y === c.y;
+            }
+          })
+        );
+        attempts++;
+      }
+      
+      t.gridX = gx;
+      t.gridY = gy;
+      getCells(t.shape, gx, gy).forEach((c) => placed.push(c));
+    }
+    return result;
+  };
+
+  const generateLevelData = () => {
+    let idCounter = 0;
+    const newTiles = [];
+    const add = (shape) => {
+      const letters =
+        shape.split("x").reduce((acc, val) => acc * parseInt(val), 1) === 2
+          ? Math.random() > 0.5
+            ? [
+                VOWELS[Math.floor(Math.random() * VOWELS.length)],
+                CONSONANTS[Math.floor(Math.random() * CONSONANTS.length)]
+              ]
+            : [
+                CONSONANTS[Math.floor(Math.random() * CONSONANTS.length)],
+                CONSONANTS[Math.floor(Math.random() * CONSONANTS.length)]
+              ]
+          : [VOWELS[Math.floor(Math.random() * VOWELS.length)]];
+
+      newTiles.push({
+        id: `t_${idCounter++}`,
+        shape,
+        letters,
+        gridX: 0,
+        gridY: 0
+      });
+    };
+
+    for (let i = 0; i < 4; i++) add("1x1");
+    for (let i = 0; i < 3; i++) add("2x1");
+    for (let i = 0; i < 3; i++) add("1x2");
+
+    return repositionTiles(newTiles);
+  };
+
+  const shuffleBoard = () => {
+    if (isShuffling || isEnding || gameState !== "PLAYING") return;
+    setIsShuffling(true);
+    setTiles((prev) => repositionTiles(prev));
+    setTimeout(() => setIsShuffling(false), 400);
+  };
+
+  const startSoloGame = () => {
+    setTimeLeft(INITIAL_TIME);
+    setCollectedWords(new Set());
+    setFlashingCells(new Set());
+    collectedWordsRef.current.clear();
+    setCurrentScore(0);
+    setTiles(generateLevelData());
+    setIsEnding(false);
+    setGameState("PLAYING");
+  };
+
+  const endSoloGame = () => {
+    if (isEnding) return;
+    setIsEnding(true);
+
+    const score = Array.from(collectedWordsRef.current).reduce(
+      (acc, w) => acc + w.length * 100,
+      0
+    );
+
+    if (score > highScore) {
+      setHighScore(score);
+      localStorage.setItem("word_bites_highscore", score);
+
+      if (window.saveHighScoreToFirebase) {
+        window.saveHighScoreToFirebase(score);
+      }
+    }
+
+    setTimeout(() => {
+      setGameState("GAMEOVER");
+      setIsEnding(false);
+    }, 1200);
+  };
+
+  const handleMoveComplete = (id, dx, dy) => {
+    if (isEnding || gameState !== "PLAYING") return;
+
+    setTiles((prev) => {
+      const idx = prev.findIndex((t) => t.id === id);
+      const t = prev[idx];
+      const sz = getCellSize();
+
+      const nX = t.gridX + Math.round(dx / sz);
+      const nY = t.gridY + Math.round(dy / sz);
+
+      const req = getCells(t.shape, nX, nY);
+
+      // Out of bounds
+      if (req.some((c) => c.x < 0 || c.x >= COLS || c.y < 0 || c.y >= ROWS))
+        return prev;
+
+      // Collision
+      if (
+        req.some((r) =>
+          prev.some(
+            (o) =>
+              o.id !== id &&
+              getCells(o.shape, o.gridX, o.gridY).some(
+                (oc) => oc.x === r.x && oc.y === r.y
+              )
+          )
+        )
+      )
+        return prev;
+
+      const next = [...prev];
+      next[idx] = { ...t, gridX: nX, gridY: nY };
+      return next;
+    });
+  };
+
+  const formatTime = (secs) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${s < 10 ? "0" : ""}${s}`;
+  };
+
+  /* ---------------- UI RENDER ---------------- */
+
+  return (
+    <div className="w-full flex flex-col gap-4 mt-4">
+
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-black text-amber-400">SINGLE PLAYER</h1>
+          <p className="text-xs text-slate-400">
+            Drag tiles to form words horizontally or vertically. 90 seconds.
+          </p>
+        </div>
+
+        <div className="text-right">
+          <div className="text-xs text-slate-400">TIME</div>
+          <div className="text-2xl font-black text-white">
+            {formatTime(timeLeft)}
+          </div>
+        </div>
+      </div>
+
+      {/* Score bar */}
+      <div className="flex items-center justify-between bg-slate-800/80 rounded-2xl px-4 py-3">
+        <div>
+          <div className="text-xs text-slate-400">SCORE</div>
+          <div className="text-xl font-black text-white">{currentScore}</div>
+        </div>
+
+        <div className="text-right">
+          <div className="text-xs text-slate-400">BEST</div>
+          <div className="text-xl font-black text-amber-400">{highScore}</div>
+        </div>
+      </div>
+
+      {/* Board */}
+      <div
+        ref={boardRef}
+        className={
+          "relative w-full overflow-hidden rounded-3xl bg-[#0e2138] board-grid border border-[#3b82f6]/40 shadow-2xl " +
+          (isShuffling ? "shuffling" : "")
+        }
+        style={{
+          width: "100%",
+          aspectRatio: "1 / 1",
+          "--cell-size": boardSize ? `${boardSize / COLS}px` : "45px"
+        }}
+      >
+        {/* Tiles */}
+        {tiles.map((t) => (
+          <Tile
+            key={t.id}
+            tile={t}
+            cellSize={getCellSize()}
+            onMoveComplete={handleMoveComplete}
+            flashingCells={flashingCells}
+            disabled={isEnding || gameState !== "PLAYING"}
+          />
+        ))}
+
+        {/* READY overlay */}
+        {gameState === "READY" && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="bg-slate-900/80 rounded-2xl px-4 py-3 text-center text-sm text-slate-200">
+              Press <span className="font-bold text-amber-300">PLAY</span> to start.
+            </div>
+          </div>
+        )}
+
+        {/* TIME'S UP overlay */}
+        {isEnding && (
+          <div className="absolute inset-0 z-[100] bg-black/60 flex items-center justify-center backdrop-blur-sm transition-all duration-300">
+            <div className="text-3xl font-black text-amber-400 animate-bounce tracking-tighter uppercase">
+              Time&apos;s Up!
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Shuffle button */}
+      <div className="flex justify-end mt-3">
+        <button
+          onClick={shuffleBoard}
+          disabled={isEnding || gameState !== "PLAYING"}
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 active:scale-90 transition-all text-white font-bold py-2 px-6 rounded-xl shadow-lg ring-2 ring-blue-400/30"
+        >
+          <svg
+            className={"w-5 h-5 " + (isShuffling ? "animate-spin" : "")}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
+          </svg>
+          SHUFFLE
+        </button>
+      </div>
+      {/* Bottom controls */}
+      <div className="flex gap-3 mt-4">
+        {gameState === "READY" && (
+          <button
+            onClick={startSoloGame}
+            className="flex-1 py-3 rounded-2xl bg-green-500 text-green-950 font-black text-sm shadow-md active:scale-95 transition-transform"
+          >
+            PLAY
+          </button>
+        )}
+
+        {gameState === "PLAYING" && (
+          <button
+            onClick={endSoloGame}
+            className="flex-1 py-3 rounded-2xl bg-red-500 text-red-950 font-black text-sm shadow-md active:scale-95 transition-transform"
+          >
+            END ROUND
+          </button>
+        )}
+
+        {gameState === "GAMEOVER" && (
+          <button
+            onClick={startSoloGame}
+            className="flex-1 py-3 rounded-2xl bg-green-500 text-green-950 font-black text-sm shadow-md active:scale-95 transition-transform"
+          >
+            PLAY AGAIN
+          </button>
+        )}
+      </div>
+
+      {/* Words Found */}
+      <div className="mt-3 bg-slate-900/80 border border-slate-700 rounded-3xl p-4 shadow-xl">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-bold text-slate-300 uppercase">
+            Words Found
+          </span>
+          <span className="text-xs text-slate-500">{collectedWords.size}</span>
+        </div>
+
+        <div className="max-h-32 overflow-y-auto custom-scrollbar text-xs text-slate-200">
+          {collectedWords.size === 0 && (
+            <div className="text-slate-500 text-xs">
+              No words yet. Try lining up letters.
+            </div>
+          )}
+
+          {Array.from(collectedWords).map((w) => (
+            <div key={w} className="flex justify-between">
+              <span>{w}</span>
+              <span className="text-amber-300 font-bold">
+                +{w.length * 100}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Game Over Card */}
+      {gameState === "GAMEOVER" && (
+        <div className="mt-4 bg-slate-900/80 border border-slate-700 rounded-3xl p-4 shadow-xl">
+          <h2 className="text-lg font-black text-amber-300 mb-2 text-center">
+            GREAT ROUND!
+          </h2>
+
+          <p className="text-slate-300 text-sm mb-2 text-center">
+            Final Score: <span className="font-bold text-white">{currentScore}</span>
+          </p>
+
+          <p className="text-slate-400 text-xs mb-3 text-center">
+            Best: <span className="font-bold text-amber-300">{highScore}</span>
+          </p>
+
+          <div className="flex gap-3">
+            <button
+              onClick={startSoloGame}
+              className="flex-1 py-2 rounded-2xl bg-green-500 text-green-950 font-bold text-xs shadow-md active:scale-95 transition-transform"
+            >
+              PLAY AGAIN
+            </button>
+
+            <button
+              onClick={() => (window.location.href = "index.html")}
+              className="flex-1 py-2 rounded-2xl bg-slate-700 text-slate-100 font-bold text-xs shadow-md active:scale-95 transition-transform"
+            >
+              BACK TO MAIN MENU
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+try {
+  const rootEl = document.getElementById("root");
+  if (!rootEl) {
+    const box = document.getElementById("errorBox");
+    if (box) {
+      box.style.display = "block";
+      box.textContent = "ERROR:\nNo #root element found in HTML.";
+    }
+  } else {
+    const root = ReactDOM.createRoot(rootEl);
+    root.render(<SinglePlayerApp />);
+  }
+} catch (err) {
+  const box = document.getElementById("errorBox");
+  if (box) {
+    box.style.display = "block";
+    box.textContent = "ERROR RENDERING REACT APP:\n" + err;
+  }
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Word Bites – Results</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+
+  <!-- 🔥 Firebase (FLAT STRUCTURE) -->
+  <script type="module">
+    const showError = (msg) => {
+      const box = document.getElementById("errorBox");
+      if (box) {
+        box.style.display = "block";
+        box.textContent = "🔥 ERROR:\n" + msg;
+      }
+    };
+
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+    import {
+      getFirestore,
+      doc,
+      getDoc,
+      deleteDoc
+    } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+    import {
+      getAuth,
+      signInAnonymously,
+      onAuthStateChanged
+    } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBQy33Ceipa8m42ccm5aOErw1PEieHjyw8",
+      authDomain: "custom-word-bites.firebaseapp.com",
+      projectId: "custom-word-bites",
+      storageBucket: "custom-word-bites.appspot.com",
+      messagingSenderId: "999136584278",
+      appId: "1:999136584278:web:88671a551de8324b95d1f7"
+    };
+
+    let app, db, auth;
+    let currentUser = null;
+    let matchRef = null;
+    let matchData = null;
+    let role = null;
+
+    try {
+      app = initializeApp(firebaseConfig);
+      db = getFirestore(app);
+      auth = getAuth(app);
+    } catch (err) {
+      showError("Firebase init failed:\n" + err);
+    }
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const matchId = urlParams.get("match");
+
+    if (!matchId) {
+      showError("No match ID provided.");
+    }
+
+    // ⭐ FLAT COLLECTION
+    const MATCHES = "matches";
+
+    const loadMatch = async () => {
+      matchRef = doc(db, MATCHES, matchId);
+      const snap = await getDoc(matchRef);
+
+      if (!snap.exists()) {
+        showError("Match not found.");
+        return;
+      }
+
+      matchData = snap.data();
+    };
+
+    const determineRole = () => {
+      if (!matchData || !currentUser) return;
+
+      if (matchData.hostId === currentUser.uid) role = "host";
+      else if (matchData.guestId === currentUser.uid) role = "guest";
+      else role = "spectator";
+    };
+
+    const deleteMatch = async () => {
+      try {
+        if (matchRef) await deleteDoc(matchRef);
+      } catch (e) {}
+    };
+
+    const goLobby = async () => {
+      await deleteMatch();
+      window.location.href = "lobby.html";
+    };
+
+    const goMenu = async () => {
+      await deleteMatch();
+      window.location.href = "index.html";
+    };
+
+    window._WB_RESULTS = {
+      async init() {
+        await loadMatch();
+        determineRole();
+        return matchData;
+      },
+      goLobby,
+      goMenu,
+      getRole() {
+        return role;
+      }
+    };
+
+    signInAnonymously(auth);
+
+    onAuthStateChanged(auth, (user) => {
+      if (!user) return;
+      currentUser = user;
+    });
+  </script>
+
+  <!-- React + ReactDOM + Babel -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.6/babel.min.js"></script>
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #0f172a;
+      font-family: ui-sans-serif, system-ui;
+    }
+    #errorBox {
+      display: none;
+      background: #7f1d1d;
+      color: #fecaca;
+      padding: 16px;
+      border-radius: 12px;
+      margin: 16px;
+      font-weight: bold;
+      white-space: pre-wrap;
+    }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 10px;
+    }
+  </style>
+</head>
+
+<body class="text-white">
+  <div id="errorBox"></div>
+
+  <div class="min-h-screen flex flex-col items-center p-4">
+    <div class="w-full max-w-md">
+      <div id="root"></div>
+    </div>
+  </div>
+
+  <!-- ⭐ React Results Screen -->
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function ResultsApp() {
+      const [loading, setLoading] = useState(true);
+      const [role, setRole] = useState(null);
+      const [winner, setWinner] = useState(null);
+      const [myScore, setMyScore] = useState(0);
+      const [oppScore, setOppScore] = useState(0);
+      const [myWords, setMyWords] = useState([]);
+      const [oppWords, setOppWords] = useState([]);
+      const [myName, setMyName] = useState("YOU");
+      const [oppName, setOppName] = useState("OPPONENT");
+
+      useEffect(() => {
+        const init = async () => {
+          const data = await window._WB_RESULTS.init();
+          if (!data) return;
+
+          const r = window._WB_RESULTS.getRole();
+          setRole(r);
+
+          setWinner(data.winner || "draw");
+
+          if (r === "host") {
+            setMyScore(data.hostScore || 0);
+            setOppScore(data.guestScore || 0);
+            setMyWords(data.hostWords || []);
+            setOppWords(data.guestWords || []);
+            setMyName(data.hostName || "YOU");
+            setOppName(data.guestName || "OPPONENT");
+          } else {
+            setMyScore(data.guestScore || 0);
+            setOppScore(data.hostScore || 0);
+            setMyWords(data.guestWords || []);
+            setOppWords(data.hostWords || []);
+            setMyName(data.guestName || "YOU");
+            setOppName(data.hostName || "OPPONENT");
+          }
+
+          setLoading(false);
+        };
+
+        init();
+      }, []);
+
+      const outcome = () => {
+        if (winner === "draw") return "IT'S A DRAW!";
+        if (winner === role) return "YOU WON!";
+        return "YOU LOST";
+      };
+
+      if (loading) {
+        return (
+          <div className="w-full mt-10 text-center text-slate-400 text-sm">
+            Loading results...
+          </div>
+        );
+      }
+
+      return (
+        <div className="w-full flex flex-col gap-4 mt-4">
+
+          <h1 className="text-2xl font-black text-amber-400 text-center">
+            MATCH RESULTS
+          </h1>
+
+          <div className="bg-slate-900/80 border border-slate-700 rounded-3xl p-4 shadow-xl">
+            <h2 className="text-xl font-black text-center text-amber-300 mb-2">
+              {outcome()}
+            </h2>
+
+            <p className="text-center text-slate-300 text-sm mb-1">
+              Your Score: <span className="font-bold text-white">{myScore}</span>
+            </p>
+            <p className="text-center text-slate-300 text-sm mb-3">
+              Opponent: <span className="font-bold text-amber-300">{oppScore}</span>
+            </p>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="bg-slate-800/80 rounded-2xl p-3">
+                <div className="text-[10px] text-slate-400 mb-1 uppercase">
+                  Your Words
+                </div>
+                <div className="max-h-32 overflow-y-auto custom-scrollbar">
+                  {myWords.length === 0 && (
+                    <div className="text-slate-500">None</div>
+                  )}
+                  {myWords.map((w) => (
+                    <div key={w} className="flex justify-between">
+                      <span>{w}</span>
+                      <span className="text-amber-300 font-bold">
+                        +{w.length * 100}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-slate-800/80 rounded-2xl p-3">
+                <div className="text-[10px] text-slate-400 mb-1 uppercase">
+                  Opponent Words
+                </div>
+                <div className="max-h-32 overflow-y-auto custom-scrollbar">
+                  {oppWords.length === 0 && (
+                    <div className="text-slate-500">None</div>
+                  )}
+                  {oppWords.map((w) => (
+                    <div key={w} className="flex justify-between">
+                      <span>{w}</span>
+                      <span className="text-amber-300 font-bold">
+                        +{w.length * 100}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-4">
+              <button
+                onClick={() => window._WB_RESULTS.goLobby()}
+                className="flex-1 py-2 rounded-2xl bg-slate-700 text-slate-100 font-bold text-xs shadow-md active:scale-95 transition-transform"
+              >
+                BACK TO LOBBY
+              </button>
+              <button
+                onClick={() => window._WB_RESULTS.goMenu()}
+                className="flex-1 py-2 rounded-2xl bg-slate-800 text-slate-100 font-bold text-xs shadow-md active:scale-95 transition-transform"
+              >
+                MAIN MENU
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<ResultsApp />);
+  </script>
+
+</body>
+</html>
